@@ -1,5 +1,5 @@
 /*
- Copyright (C) 2011 James Coliz, Jr. <maniacbug@ymail.com>
+ Copyright (C) 2011 J. Coliz <maniacbug@ymail.com>
 
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
@@ -13,6 +13,7 @@
  */
 
 #include <SPI.h>
+#include "nRF24L01.h"
 #include "RF24.h"
 #include "printf.h"
 
@@ -20,25 +21,20 @@
 // Hardware configuration
 //
 
-// Set up nRF24L01 radio on SPI bus plus pins 8 & 9
-RF24 radio(8,9);
+// Set up nRF24L01 radio on SPI bus plus pins 9 & 10
 
-// Use multicast?
-// sets the multicast behavior this unit in hardware.  Connect to GND to use unicast
-// Leave open (default) to use multicast.
-const int multicast_pin = 6 ;
+RF24 radio(9,10);
 
 // sets the role of this unit in hardware.  Connect to GND to be the 'pong' receiver
 // Leave open to be the 'ping' transmitter
-const int role_pin = 7;
-bool multicast = true ;
+//const int role_pin = 7;
 
 //
 // Topology
 //
 
 // Radio pipe addresses for the 2 nodes to communicate.
-const uint64_t pipes[2] = { 0xEEFAFDFDEELL, 0xEEFDFAF50DFLL };
+const uint64_t pipes[2] = { 0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL };
 
 //
 // Role management
@@ -54,7 +50,7 @@ const uint64_t pipes[2] = { 0xEEFAFDFDEELL, 0xEEFDFAF50DFLL };
 typedef enum { role_ping_out = 1, role_pong_back } role_e;
 
 // The debug-friendly names of those roles
-const char* role_friendly_name[] = { "invalid", "Ping out", "Pong back"};
+const char* role_friendly_name[] = { "invalid", "Ping out", "Base Station"};
 
 // The role of the current running sketch
 role_e role;
@@ -63,9 +59,9 @@ role_e role;
 // Payload
 //
 
-const int min_payload_size = 1;
+const int min_payload_size = 4;
 const int max_payload_size = 32;
-const int payload_size_increments_by = 1;
+const int payload_size_increments_by = 2;
 int next_payload_size = min_payload_size;
 
 char receive_payload[max_payload_size+1]; // +1 to allow room for a terminating NULL char
@@ -73,32 +69,18 @@ char receive_payload[max_payload_size+1]; // +1 to allow room for a terminating 
 void setup(void)
 {
   //
-  // Multicast
-  //
-  pinMode(multicast_pin, INPUT);
-  digitalWrite(multicast_pin,HIGH);
-  delay( 20 ) ;
-
-  // read multicast role, LOW for unicast
-  if( digitalRead( multicast_pin ) )
-    multicast = true ;
-  else
-    multicast = false ;
-
-
- //
   // Role
   //
 
   // set up the role pin
-  pinMode(role_pin, INPUT);
-  digitalWrite(role_pin,HIGH);
-  delay( 20 ); // Just to get a solid reading on the role pin
+//  pinMode(role_pin, INPUT);
+//  digitalWrite(role_pin,HIGH);
+//  delay(20); // Just to get a solid reading on the role pin
 
-  // read the address pin, establish our role
-  if ( digitalRead(role_pin) )
-    role = role_ping_out;
-  else
+  // read the address pin, establish our role/
+//  if ( digitalRead(role_pin) )
+//    role = role_ping_out;
+//  else
     role = role_pong_back;
 
   //
@@ -107,9 +89,9 @@ void setup(void)
 
   Serial.begin(57600);
   printf_begin();
-  printf("\n\rRF24/examples/pingpair_multi_dyn/\n\r");
+  printf("\n\rRF24/examples/pingpair_dyn/\n\r");
   printf("ROLE: %s\n\r",role_friendly_name[role]);
-  printf("MULTICAST: %s\r\n",(multicast?"true (unreliable)":"false (reliable)"));
+
   //
   // Setup and configure rf radio
   //
@@ -118,12 +100,9 @@ void setup(void)
 
   // enable dynamic payloads
   radio.enableDynamicPayloads();
-  radio.setCRCLength( RF24_CRC_16 ) ;
 
   // optionally, increase the delay between retries & # of retries
-  radio.setRetries( 15, 5 ) ;
-  radio.setAutoAck( true ) ;
-  //radio.setPALevel( RF24_PA_LOW ) ;
+  radio.setRetries(15,15);
 
   //
   // Open pipes to other nodes for communication
@@ -148,7 +127,7 @@ void setup(void)
   //
   // Start listening
   //
-  radio.powerUp() ;
+
   radio.startListening();
 
   //
@@ -160,65 +139,11 @@ void setup(void)
 
 void loop(void)
 {
-  //
-  // Ping out role.  Repeatedly send the current time
-  //
-
-  if (role == role_ping_out)
-  {
-    // The payload will always be the same, what will change is how much of it we send.
-    static char send_payload[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ789012";
-
-    // First, stop listening so we can talk.
-    radio.stopListening();
-
-    // Take the time, and send it.  This will block until complete
-    printf("Now sending length %i...",next_payload_size);
-    radio.write( send_payload, next_payload_size, multicast );
-
-    // Now, continue listening
-    radio.startListening();
-
-    // Wait here until we get a response, or timeout
-    unsigned long started_waiting_at = millis();
-    bool timeout = false;
-    while ( ! radio.available() && ! timeout )
-      if (millis() - started_waiting_at > 1 + radio.getMaxTimeout()/1000 )
-        timeout = true;
-
-    // Describe the results
-    if ( timeout )
-    {
-      printf("Failed, response timed out.\n\r");
-    }
-    else
-    {
-      // Grab the response, compare, and send to debugging spew
-      uint8_t len = radio.getDynamicPayloadSize();
-      radio.read( receive_payload, len );
-
-      // Put a zero at the end for easy printing
-      receive_payload[len] = 0;
-
-      // Spew it
-      printf("Got response size=%i value=%s\n\r",len,receive_payload);
-    }
-    
-    // Update size for next time.
-    next_payload_size += payload_size_increments_by;
-    if ( next_payload_size > max_payload_size )
-      next_payload_size = min_payload_size;
-
-    // Try again 1s later
-    delay(250);
-  }
 
   //
   // Pong back role.  Receive each packet, dump it out, and send it back
   //
 
-  if ( role == role_pong_back )
-  {
     // if there is data ready
     if ( radio.available() )
     {
@@ -242,12 +167,12 @@ void loop(void)
       radio.stopListening();
 
       // Send the final one back.
-      radio.write( receive_payload, len, multicast );
+      radio.write( receive_payload, len );
       printf("Sent response.\n\r");
 
       // Now, resume listening so we catch the next packets.
       radio.startListening();
     }
-  }
+  
 }
 // vim:cin:ai:sts=2 sw=2 ft=cpp

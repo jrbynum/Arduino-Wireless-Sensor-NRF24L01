@@ -12,9 +12,9 @@ unsigned long prev, interval = 5000;
 
 void setup()
 {
-    Serial.begin(9600);
+    Serial.begin(57600);
     Wire.begin();
-    DS3231_init(DS3231_INTCN);
+    //DS3231_init(0x1C);
     memset(recv, 0, BUFF_MAX);
     Serial.println("GET time");
 }
@@ -130,6 +130,11 @@ void parse_cmd(char *cmd, int cmdsize)
         Serial.println(bcdtodec(reg_val & 0x1F),DEC);
     } else if (cmd[0] == 71 && cmdsize == 1) {  // "G" - set aging status register
         DS3231_set_aging(0);
+    } else if (cmd[0] == 72 && cmdsize == 1) {  // "H" - set status register
+        DS3231_set_addr(0x0E, 0x1C);
+    } else if (cmd[0] == 73 && cmdsize == 1) {  // "I" - get status register
+        Serial.print("Cntl reg is ");
+        Serial.println(DS3231_get_addr(0x0E), DEC);
     } else if (cmd[0] == 83 && cmdsize == 1) {  // "S" - get status register
         Serial.print("status reg is ");
         Serial.println(DS3231_get_sreg(), DEC);
